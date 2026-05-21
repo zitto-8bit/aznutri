@@ -5,6 +5,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Pacientes from './pages/Pacientes';
 import PerfilPaciente from './pages/PerfilPaciente';
+import ErrorPage from './pages/ErrorPage';
 
 function App() {
   const [session, setSession] = useState<any>(null);
@@ -73,6 +74,11 @@ function App() {
         <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
       </div>
     );
+  }
+
+  // Rota de erro acessível independentemente da sessão
+  if (currentPath === '/erro' || currentPath === '/error') {
+    return <ErrorPage message="Ocorreu um erro no sistema. Sugerimos fazer login novamente." />;
   }
 
   // Auth Protection Logic

@@ -22,6 +22,7 @@ interface Consulta {
 interface AlimentoItem {
   alimento: string;
   quantidade: string;
+  calorias?: number;
 }
 
 interface Refeicao {
@@ -167,6 +168,120 @@ interface SugestaoRefeicao {
   alimentos: AlimentoItem[];
 }
 
+// ============================================================
+// HELPERS DE CALORIAS E HORÁRIOS (fora do componente)
+// ============================================================
+
+// Tabela nutricional interna com calorias por 100g ou por unidade padrão
+const CALORIAS_BASE: Record<string, number> = {
+  'arroz': 130, 'arroz integral': 111, 'feijão': 77, 'feijão preto': 77, 'lentilha': 116,
+  'frango': 165, 'peito de frango': 165, 'filé de frango': 165, 'carne': 250, 'carne bovina': 250,
+  'ovo': 155, 'ovos': 155, 'clara de ovo': 52, 'gema': 322,
+  'pão': 265, 'pão integral': 247, 'pão de forma': 265, 'torrada': 392,
+  'batata doce': 86, 'batata': 77, 'mandioca': 125, 'aipim': 125,
+  'aveia': 389, 'granola': 471, 'quinoa': 120,
+  'banana': 89, 'maçã': 52, 'laranja': 47, 'mamão': 43, 'morango': 32, 'uva': 69,
+  'leite': 61, 'iogurte': 59, 'queijo': 402, 'ricota': 174, 'cottage': 98,
+  'whey': 370, 'proteína': 370,
+  'azeite': 884, 'óleo': 884,
+  'amendoim': 567, 'castanha': 656, 'nozes': 654, 'amêndoas': 579,
+  'salmão': 208, 'tilápia': 96, 'atum': 116, 'sardinha': 208,
+  'brócolis': 34, 'cenoura': 41, 'espinafre': 23, 'alface': 15,
+  'tomate': 18, 'pepino': 15, 'abobrinha': 17, 'berinjela': 25,
+  'couve': 35, 'repolho': 25, 'beterraba': 43, 'chuchu': 19,
+  'abacate': 160, 'coco': 354, 'chia': 486, 'linhaça': 534,
+  'mel': 304, 'açúcar': 387, 'cacau': 228,
+  'macarrão': 131, 'macarrão integral': 124,
+  'tapioca': 340, 'farinha': 364,
+  'chá': 2, 'café': 2,
+};
+
+const estimarCaloriasItem = (alimento: string, quantidade: string): number => {
+  if (!alimento) return 0;
+  const alLower = alimento.toLowerCase();
+  let kcalPor100g = 0;
+  for (const chave of Object.keys(CALORIAS_BASE)) {
+    if (alLower.includes(chave)) {
+      kcalPor100g = CALORIAS_BASE[chave];
+      break;
+    }
+  }
+  if (!kcalPor100g) return 0;
+
+  const qtdLower = quantidade.toLowerCase();
+  const matchGramas = qtdLower.match(/(\d+(?:[.,]\d+)?)\s*g/);
+  const matchColhSopa = qtdLower.match(/(\d+(?:[.,]\d+)?)\s*colher[es\s]*(?:de)?\s*sopa/);
+  const matchColhChá = qtdLower.match(/(\d+(?:[.,]\d+)?)\s*colher[es\s]*(?:de)?\s*chá/);
+  const matchUnidade = qtdLower.match(/(\d+(?:[.,]\d+)?)\s*(?:unidade|unid|und|fatia|fatias|concha)/);
+  const matchMl = qtdLower.match(/(\d+(?:[.,]\d+)?)\s*ml/);
+
+  if (matchGramas) {
+    return Math.round((kcalPor100g * parseFloat(matchGramas[1].replace(',', '.'))) / 100);
+  } else if (matchColhSopa) {
+    return Math.round(kcalPor100g * parseFloat(matchColhSopa[1].replace(',', '.')) * 0.15);
+  } else if (matchColhChá) {
+    return Math.round(kcalPor100g * parseFloat(matchColhChá[1].replace(',', '.')) * 0.05);
+  } else if (matchUnidade) {
+    return Math.round(kcalPor100g * parseFloat(matchUnidade[1].replace(',', '.')) * 1.0);
+  } else if (matchMl) {
+    return Math.round((kcalPor100g * parseFloat(matchMl[1].replace(',', '.'))) / 100);
+  }
+  // Estimativa padrão de 1 porção (100g)
+  return Math.round(kcalPor100g * 1.0);
+};
+
+const horaStringToMinutos = (horaStr: string): number => {
+  if (!horaStr) return 0;
+  const partes = horaStr.split(':');
+  const h = parseInt(partes[0]) || 0;
+  const m = parseInt(partes[1]) || 0;
+  return h * 60 + m;
+};
+
+const minutosParaHoraString = (minutos: number): string => {
+  // Normaliza para [0, 1440)
+  const m = ((minutos % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+};
+
+const NOMES_REFEICOES = [
+  'Café da Manhã', 'Colação', 'Almoço', 'Lanche da Tarde', 'Jantar', 'Ceia'
+];
+
+const gerarPlanoAlimentarDinamico = (
+  acorda: string,
+  dorme: string,
+  numRefeicoes: number
+): Refeicao[] => {
+  const iniciMin = horaStringToMinutos(acorda || '06:30');
+  let fimMin = horaStringToMinutos(dorme || '22:00');
+  // Se dorme antes de acordar (cruzou meia-noite), adiciona 1440
+  if (fimMin <= iniciMin) fimMin += 1440;
+
+  const qtd = Math.max(2, Math.min(numRefeicoes, 6));
+  const intervalo = Math.floor((fimMin - iniciMin) / (qtd - 1));
+
+  return Array.from({ length: qtd }, (_, i) => ({
+    nome: NOMES_REFEICOES[i] || `Refeição ${i + 1}`,
+    horario: minutosParaHoraString(iniciMin + intervalo * i),
+    itens: [{ alimento: '', quantidade: '' }]
+  }));
+};
+
+const parseObservacoesPerfil = (obsText: string | null) => {
+  if (!obsText) return { temSeletividade: false, alimentosSeletividade: '', observacoesLimpa: '' };
+  const match = obsText.match(/\[SELETIVIDADE:\s*(Sim|Não)\]\[ALIMENTOS:\s*([^\]]*)\]/i);
+  if (match) {
+    const temSel = match[1].toLowerCase() === 'sim';
+    const alSel = match[2] || '';
+    const obsL = obsText.replace(/\[SELETIVIDADE:\s*(Sim|Não)\]\[ALIMENTOS:\s*([^\]]*)\]\s*/i, '').trim();
+    return { temSeletividade: temSel, alimentosSeletividade: alSel, observacoesLimpa: obsL };
+  }
+  return { temSeletividade: false, alimentosSeletividade: '', observacoesLimpa: obsText };
+};
+
 const OBJETIVOS_SUGERIDOS = ['Emagrecer', 'Ganhar massa', 'Controlar diabetes', 'Saúde geral', 'Performance esportiva', 'Reeducação alimentar'];
 const PATOLOGIAS_SUGERIDAS = ['Diabetes', 'Hipertensão', 'Hipotireoidismo', 'Hipertireoidismo', 'Síndrome do ovário policístico', 'Doença celíaca', 'Colesterol alto'];
 const ALERGIAS_SUGERIDAS = ['Amendoim', 'Leite', 'Ovo', 'Soja', 'Trigo', 'Frutos do mar'];
@@ -225,6 +340,11 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
   // Editor do Plano Alimentar
   const [isEditingPlano, setIsEditingPlano] = useState(false);
   const [planoLoading, setPlanoLoading] = useState(false);
+  const [temPlanoSalvo, setTemPlanoSalvo] = useState(false);
+
+  // Seletividade alimentar do paciente
+  const [temSeletividade, setTemSeletividade] = useState(false);
+  const [alimentosSeletividade, setAlimentosSeletividade] = useState('');
 
   // Estados do Modal de Edição do Paciente
   const [isPacienteModalOpen, setIsPacienteModalOpen] = useState(false);
@@ -427,8 +547,13 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
     setLitrosAgua(paciente.litros_agua ? paciente.litros_agua.toString() : '2');
     setAtividadeFisica(paciente.atividade_fisica || false);
     setAtividadeFisicaDescricao(paciente.atividade_fisica_descricao || '');
-    setObservacoes(paciente.observacoes || '');
     setDietaBaixoCusto(paciente.dieta_baixo_custo || false);
+
+    // Parse da seletividade a partir do campo observacoes
+    const { temSeletividade: temSel, alimentosSeletividade: alSel, observacoesLimpa: obsL } = parseObservacoesPerfil(paciente.observacoes);
+    setTemSeletividade(temSel);
+    setAlimentosSeletividade(alSel);
+    setObservacoes(obsL);
 
     setFormTab('pessoal');
     setFormError(null);
@@ -440,7 +565,39 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
     setFormError(null);
     setFormLoading(true);
 
+    // Validação de Ficha Vazia no Prontuário
+    const isFichaClinicaVazia =
+      !pesoInicial.trim() &&
+      !altura.trim() &&
+      objetivos.length === 0 &&
+      !objetivoTexto.trim() &&
+      patologias.length === 0 &&
+      restricoes.length === 0 &&
+      alergias.length === 0 &&
+      !medicamentos.trim() &&
+      !suplementos.trim() &&
+      !horarioAcorda.trim() &&
+      !horarioDorme.trim() &&
+      !observacoes.trim() &&
+      !atividadeFisica &&
+      !atividadeFisicaDescricao.trim() &&
+      (!temSeletividade || !alimentosSeletividade.trim());
+
+    if (isFichaClinicaVazia) {
+      setFormError("A ficha clínica e de hábitos do paciente não pode estar totalmente vazia. Preencha pelo menos um campo nas abas 'Clínico' ou 'Hábitos' antes de salvar.");
+      setFormLoading(false);
+      return;
+    }
+
     try {
+      // Montar campo observacoes com seletividade embutida
+      let obsFinal = observacoes;
+      if (temSeletividade) {
+        obsFinal = `[SELETIVIDADE: Sim][ALIMENTOS: ${alimentosSeletividade}] ${observacoes}`.trim();
+      } else {
+        obsFinal = `[SELETIVIDADE: Não][ALIMENTOS: ] ${observacoes}`.trim();
+      }
+
       const payload = {
         nome,
         email: email || null,
@@ -464,7 +621,7 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
         litros_agua: litrosAgua ? parseFloat(litrosAgua) : null,
         atividade_fisica: atividadeFisica,
         atividade_fisica_descricao: atividadeFisicaDescricao || null,
-        observacoes: observacoes || null,
+        observacoes: obsFinal || null,
         dieta_baixo_custo: dietaBaixoCusto
       };
 
@@ -554,18 +711,21 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
       if (planError) throw planError;
       if (planoData && planoData.length > 0) {
         setPlanoAlimentar(planoData[0].conteudo as Refeicao[]);
+        setTemPlanoSalvo(true);
       } else {
-        // Criar plano padrão vazio para edição
-        const defaultPlano: Refeicao[] = [
-          { nome: "Café da Manhã", horario: "07:30", itens: [{ alimento: "", quantidade: "" }] },
-          { nome: "Colação", horario: "10:00", itens: [{ alimento: "", quantidade: "" }] },
-          { nome: "Almoço", horario: "12:30", itens: [{ alimento: "", quantidade: "" }] },
-          { nome: "Lanche da Tarde", horario: "16:00", itens: [{ alimento: "", quantidade: "" }] },
-          { nome: "Jantar", horario: "19:30", itens: [{ alimento: "", quantidade: "" }] },
-          { nome: "Ceia", horario: "22:00", itens: [{ alimento: "", quantidade: "" }] }
-        ];
-        setPlanoAlimentar(defaultPlano);
+        // Gerar plano dinâmico adaptado à ficha do paciente
+        const numRef = (pacienteData as Paciente).refeicoes_por_dia || 5;
+        const acorda = (pacienteData as Paciente).horario_acorda || '06:30';
+        const dorme = (pacienteData as Paciente).horario_dorme || '22:00';
+        const dinâmico = gerarPlanoAlimentarDinamico(acorda, dorme, numRef);
+        setPlanoAlimentar(dinâmico);
+        setTemPlanoSalvo(false);
       }
+
+      // Parsear seletividade do campo observacoes do paciente
+      const { temSeletividade: temSel, alimentosSeletividade: alSel } = parseObservacoesPerfil((pacienteData as Paciente).observacoes);
+      setTemSeletividade(temSel);
+      setAlimentosSeletividade(alSel);
 
     } catch (error) {
       console.error('Erro ao buscar dados do paciente:', error);
@@ -658,9 +818,44 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
   };
 
   // Auxiliares do editor de plano
-  const handleAlimentoChange = (mealIndex: number, itemIndex: number, field: keyof AlimentoItem, val: string) => {
+  const handleAlimentoChange = (mealIndex: number, itemIndex: number, field: keyof AlimentoItem, val: string | number) => {
     const novoPlano = [...planoAlimentar];
-    novoPlano[mealIndex].itens[itemIndex][field] = val;
+    (novoPlano[mealIndex].itens[itemIndex] as Record<string, string | number>)[field as string] = val;
+    setPlanoAlimentar(novoPlano);
+  };
+
+  // Sincronizar horários do plano com a ficha do paciente
+  const handleSincronizarHorarios = () => {
+    if (!paciente) return;
+    const numRef = paciente.refeicoes_por_dia || planoAlimentar.length || 5;
+    const acorda = paciente.horario_acorda || '06:30';
+    const dorme = paciente.horario_dorme || '22:00';
+    const novosHorarios = gerarPlanoAlimentarDinamico(acorda, dorme, numRef);
+
+    // Preservar alimentos já preenchidos se o nome da refeição coincidir
+    const novoPlano = novosHorarios.map(novaRef => {
+      const existente = planoAlimentar.find(r => r.nome === novaRef.nome);
+      return existente
+        ? { ...novaRef, itens: existente.itens }
+        : novaRef;
+    });
+    setPlanoAlimentar(novoPlano);
+  };
+
+  // Aplicar alimentos da seletividade na refeição
+  const handleAplicarSeletividade = (mealIndex: number) => {
+    if (!alimentosSeletividade.trim()) return;
+    const alimentos = alimentosSeletividade
+      .split(',')
+      .map(a => a.trim())
+      .filter(Boolean);
+    if (!alimentos.length) return;
+    const novoPlano = [...planoAlimentar];
+    novoPlano[mealIndex].itens = alimentos.map(a => ({
+      alimento: a,
+      quantidade: '1 porção',
+      calorias: estimarCaloriasItem(a, '100g')
+    }));
     setPlanoAlimentar(novoPlano);
   };
 
@@ -685,6 +880,18 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
     novoPlano[mealIndex].horario = val;
     setPlanoAlimentar(novoPlano);
   };
+
+  // Calcular calorias de uma refeição
+  const calcularCaloriasRefeicao = (meal: Refeicao): number =>
+    meal.itens.reduce((acc, it) => {
+      if (it.calorias !== undefined) return acc + (it.calorias || 0);
+      return acc + estimarCaloriasItem(it.alimento, it.quantidade);
+    }, 0);
+
+  // Total calórico diário
+  const totalCaloriasDia = planoAlimentar.reduce(
+    (acc, meal) => acc + calcularCaloriasRefeicao(meal), 0
+  );
 
   // Cálculos Clínicos
   const calcularIdade = (dataNascStr: string | null) => {
@@ -1039,8 +1246,31 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
             ======================================================== */}
         {activeTab === 'plano' && (
           <div className="tab-content-panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 className="info-card-title" style={{ fontSize: '18px', border: 'none', margin: 0, padding: 0 }}>Plano Alimentar Ativo</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h2 className="info-card-title" style={{ fontSize: '18px', border: 'none', margin: 0, padding: 0 }}>Plano Alimentar Ativo</h2>
+                {totalCaloriasDia > 0 && (
+                  <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--gray-500)' }}>Total estimado do dia:</span>
+                    <span style={{
+                      background: 'linear-gradient(135deg, #2D5A27, #4CAF50)',
+                      color: '#fff',
+                      fontWeight: '700',
+                      fontSize: '14px',
+                      padding: '3px 12px',
+                      borderRadius: '20px',
+                      letterSpacing: '0.3px'
+                    }}>
+                      🔥 {totalCaloriasDia} kcal/dia
+                    </span>
+                    {!temPlanoSalvo && (
+                      <span style={{ fontSize: '11px', color: 'var(--primary-orange)', fontWeight: '600', background: '#fff3eb', border: '1px solid #ffd8be', borderRadius: '10px', padding: '2px 8px' }}>
+                        ✨ Plano gerado automaticamente
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
               
               {!isEditingPlano ? (
                 <button className="btn-primary" style={{ marginTop: 0, padding: '10px 18px' }} onClick={() => setIsEditingPlano(true)}>
@@ -1048,7 +1278,16 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
                   <span>Editar Plano Alimentar</span>
                 </button>
               ) : (
-                <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    onClick={handleSincronizarHorarios}
+                    title="Ajusta os horários das refeições de acordo com os horários de acordar/dormir na ficha do paciente"
+                  >
+                    🔄 Sincronizar Horários da Ficha
+                  </button>
                   <button className="btn-secondary" onClick={() => { setIsEditingPlano(false); fetchPacienteData(); }}>
                     Cancelar
                   </button>
@@ -1070,15 +1309,22 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
                         <Coffee size={20} className="meal-icon" />
                         <span className="meal-name">{meal.nome}</span>
                       </div>
-                      <div className="meal-title-group">
-                        <Clock size={16} color="var(--gray-500)" />
-                        <input
-                          type="text"
-                          className="meal-time"
-                          style={{ width: '80px', border: '1px solid var(--gray-200)', borderRadius: '4px', textAlign: 'center' }}
-                          value={meal.horario}
-                          onChange={(e) => handleMealTimeChange(mealIdx, e.target.value)}
-                        />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        {calcularCaloriasRefeicao(meal) > 0 && (
+                          <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--primary-orange)', background: '#fff7ed', padding: '3px 10px', borderRadius: '12px', border: '1px solid #ffd8be' }}>
+                            🔥 {calcularCaloriasRefeicao(meal)} kcal
+                          </span>
+                        )}
+                        <div className="meal-title-group">
+                          <Clock size={16} color="var(--gray-500)" />
+                          <input
+                            type="text"
+                            className="meal-time"
+                            style={{ width: '80px', border: '1px solid var(--gray-200)', borderRadius: '4px', textAlign: 'center' }}
+                            value={meal.horario}
+                            onChange={(e) => handleMealTimeChange(mealIdx, e.target.value)}
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1099,9 +1345,23 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
                               <input
                                 type="text"
                                 className="alimento-input"
-                                placeholder="Quantidade (ex: 2 unidades)"
+                                placeholder="Qtd (ex: 2 unidades)"
                                 value={item.quantidade}
                                 onChange={(e) => handleAlimentoChange(mealIdx, itemIdx, 'quantidade', e.target.value)}
+                              />
+                            </div>
+                            <div className="calorias-field">
+                              <input
+                                type="number"
+                                className="alimento-input"
+                                placeholder="kcal"
+                                style={{ textAlign: 'center' }}
+                                value={
+                                  item.calorias !== undefined
+                                    ? item.calorias
+                                    : (item.alimento ? estimarCaloriasItem(item.alimento, item.quantidade) : '')
+                                }
+                                onChange={(e) => handleAlimentoChange(mealIdx, itemIdx, 'calorias', parseFloat(e.target.value) || 0)}
                               />
                             </div>
                             <button 
@@ -1115,14 +1375,38 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
                         ))}
                       </div>
 
-                      <button 
-                        type="button" 
-                        className="btn-add-alimento"
-                        onClick={() => addAlimentoRow(mealIdx)}
-                      >
-                        <PlusCircle size={16} />
-                        <span>Adicionar Alimento</span>
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                        <button 
+                          type="button" 
+                          className="btn-add-alimento"
+                          onClick={() => addAlimentoRow(mealIdx)}
+                        >
+                          <PlusCircle size={16} />
+                          <span>Adicionar Alimento</span>
+                        </button>
+                        {temSeletividade && alimentosSeletividade.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => handleAplicarSeletividade(mealIdx)}
+                            style={{
+                              background: 'linear-gradient(135deg, #ff8c00, var(--primary-orange))',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              padding: '10px 16px',
+                              fontSize: '13px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              transition: 'var(--transition)'
+                            }}
+                          >
+                            ✨ Aplicar Seletividade
+                          </button>
+                        )}
+                      </div>
 
                       {/* Painel de Sugestões de Dieta Premium Adaptativas */}
                       <div className="sugestoes-panel" style={{ marginTop: '20px', borderTop: '1px dotted var(--gray-200)', paddingTop: '16px' }}>
@@ -1190,33 +1474,74 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
               </div>
             ) : (
               // MODO VISUALIZAÇÃO
-              <div className="info-cards-grid">
-                {planoAlimentar.some(m => m.itens.length > 0) ? (
-                  planoAlimentar.map((meal, idx) => (
-                    meal.itens.length > 0 && (
-                      <div className="meal-view-card" key={idx}>
-                        <div className="meal-view-header">
-                          <span className="meal-view-title">
-                            <Coffee size={18} color="var(--primary-orange)" />
-                            {meal.nome}
-                          </span>
-                          <span className="meal-view-time">{meal.horario}</span>
-                        </div>
-                        <div className="meal-view-items">
-                          {meal.itens.map((item, i) => (
-                            <div className="meal-view-item" key={i}>
-                              <span style={{ fontWeight: '700' }}>{item.alimento}</span> - <span style={{ color: 'var(--gray-500)', fontSize: '13px' }}>{item.quantidade}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  ))
-                ) : (
-                  <div className="empty-state" style={{ gridColumn: 'span 3', padding: '60px' }}>
-                    Nenhum plano alimentar cadastrado ainda. Clique em "Editar Plano Alimentar" para estruturar as refeições do seu paciente!
+              <div>
+                {!temPlanoSalvo && planoAlimentar.some(m => m.itens.some(it => it.alimento.trim() === '')) && (
+                  <div style={{
+                    background: 'linear-gradient(135deg, #fff7ed, #fff3e0)',
+                    border: '2px dashed var(--primary-orange)',
+                    borderRadius: '16px',
+                    padding: '36px 24px',
+                    textAlign: 'center',
+                    marginBottom: '24px'
+                  }}>
+                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>🥗</div>
+                    <p style={{ fontSize: '17px', fontWeight: '700', color: 'var(--primary-orange)', marginBottom: '12px' }}>
+                      Ainda sem planos alimentares, gostaria de criar?
+                    </p>
+                    <p style={{ fontSize: '13px', color: 'var(--gray-500)', marginBottom: '20px' }}>
+                      O sistema gerou uma estrutura inicial com base nos horários e refeições da ficha do paciente.
+                    </p>
+                    <button
+                      className="btn-primary"
+                      style={{ marginTop: 0, width: 'auto', padding: '12px 28px', fontSize: '15px' }}
+                      onClick={() => setIsEditingPlano(true)}
+                    >
+                      <Edit2 size={16} />
+                      <span>✅ Sim, criar plano alimentar</span>
+                    </button>
                   </div>
                 )}
+                <div className="info-cards-grid">
+                  {planoAlimentar.some(m => m.itens.some(it => it.alimento.trim() !== '')) ? (
+                    planoAlimentar.map((meal, idx) => (
+                      meal.itens.some(it => it.alimento.trim() !== '') && (
+                        <div className="meal-view-card" key={idx}>
+                          <div className="meal-view-header">
+                            <span className="meal-view-title">
+                              <Coffee size={18} color="var(--primary-orange)" />
+                              {meal.nome}
+                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                              <span className="meal-view-time">{meal.horario}</span>
+                              {calcularCaloriasRefeicao(meal) > 0 && (
+                                <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--primary-orange)' }}>
+                                  🔥 {calcularCaloriasRefeicao(meal)} kcal
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="meal-view-items">
+                            {meal.itens.filter(it => it.alimento.trim() !== '').map((item, i) => {
+                              const kcal = item.calorias !== undefined ? item.calorias : estimarCaloriasItem(item.alimento, item.quantidade);
+                              return (
+                                <div className="meal-view-item" key={i}>
+                                  <span style={{ fontWeight: '700' }}>{item.alimento}</span>
+                                  {' - '}
+                                  <span style={{ color: 'var(--gray-500)', fontSize: '13px' }}>{item.quantidade}</span>
+                                  {kcal > 0 && (
+                                    <span style={{ color: 'var(--primary-orange)', fontSize: '12px', fontWeight: '600', marginLeft: '6px' }}>
+                                      ({kcal} kcal)
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    ))
+                  ) : null}
+                </div>
               </div>
             )}
           </div>

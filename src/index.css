@@ -1403,6 +1403,11 @@ input:checked + .slider:before {
   flex: 1.5;
 }
 
+.calorias-field {
+  flex: 0.8;
+  min-width: 80px;
+}
+
 .alimento-input {
   width: 100%;
   padding: 10px 12px;

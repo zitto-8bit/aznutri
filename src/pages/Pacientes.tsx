@@ -85,6 +85,22 @@ const Pacientes: React.FC = () => {
   const [alergias, setAlergias] = useState<string[]>([]);
   const [newAlergia, setNewAlergia] = useState('');
 
+  // Seletividade alimentar
+  const [temSeletividade, setTemSeletividade] = useState(false);
+  const [alimentosSeletividade, setAlimentosSeletividade] = useState('');
+
+  const parseObservacoes = (obsText: string | null) => {
+    if (!obsText) return { temSeletividade: false, alimentosSeletividade: '', observacoesLimpa: '' };
+    const match = obsText.match(/\[SELETIVIDADE:\s*(Sim|Não)\]\[ALIMENTOS:\s*([^\]]*)\]/i);
+    if (match) {
+      const temSel = match[1].toLowerCase() === 'sim';
+      const alSel = match[2] || '';
+      const obsL = obsText.replace(/\[SELETIVIDADE:\s*(Sim|Não)\]\[ALIMENTOS:\s*([^\]]*)\]\s*/i, '');
+      return { temSeletividade: temSel, alimentosSeletividade: alSel, observacoesLimpa: obsL };
+    }
+    return { temSeletividade: false, alimentosSeletividade: '', observacoesLimpa: obsText };
+  };
+
   // Funções utilitárias auxiliares de UX
   const formatarTelefone = (value: string) => {
     const nums = value.replace(/\D/g, '');
@@ -201,7 +217,38 @@ const Pacientes: React.FC = () => {
       return;
     }
 
+    // Validação de Ficha Vazia
+    const isFichaClinicaVazia = 
+      !pesoInicial.trim() && 
+      !altura.trim() && 
+      objetivos.length === 0 && 
+      !objetivoTexto.trim() && 
+      patologias.length === 0 && 
+      restricoes.length === 0 && 
+      alergias.length === 0 && 
+      !medicamentos.trim() && 
+      !suplementos.trim() && 
+      !horarioAcorda.trim() && 
+      !horarioDorme.trim() && 
+      !observacoes.trim() && 
+      !atividadeFisica && 
+      !atividadeFisicaDescricao.trim() &&
+      (!temSeletividade || !alimentosSeletividade.trim());
+
+    if (isFichaClinicaVazia) {
+      setFormError("A ficha clínica e de hábitos do paciente não pode estar totalmente vazia. Preencha pelo menos um campo nas abas 'Clínico' ou 'Hábitos' antes de salvar.");
+      setFormLoading(false);
+      return;
+    }
+
     try {
+      let obsFinal = observacoes;
+      if (temSeletividade) {
+        obsFinal = `[SELETIVIDADE: Sim][ALIMENTOS: ${alimentosSeletividade}] ${observacoes}`;
+      } else {
+        obsFinal = `[SELETIVIDADE: Não][ALIMENTOS: ] ${observacoes}`;
+      }
+
       const payload = {
         nutricionista_id: nutriId,
         nome,
@@ -226,7 +273,7 @@ const Pacientes: React.FC = () => {
         litros_agua: litrosAgua ? parseFloat(litrosAgua) : null,
         atividade_fisica: atividadeFisica,
         atividade_fisica_descricao: atividadeFisicaDescricao || null,
-        observacoes: observacoes || null,
+        observacoes: obsFinal || null,
         dieta_baixo_custo: dietaBaixoCusto
       };
 
@@ -292,7 +339,13 @@ const Pacientes: React.FC = () => {
     setLitrosAgua(p.litros_agua ? p.litros_agua.toString() : '2');
     setAtividadeFisica(p.atividade_fisica || false);
     setAtividadeFisicaDescricao(p.atividade_fisica_descricao || '');
-    setObservacoes(p.observacoes || '');
+    
+    // Parse da seletividade e observações
+    const { temSeletividade: temSel, alimentosSeletividade: alSel, observacoesLimpa: obsL } = parseObservacoes(p.observacoes);
+    setTemSeletividade(temSel);
+    setAlimentosSeletividade(alSel);
+    setObservacoes(obsL);
+
     setDietaBaixoCusto(p.dieta_baixo_custo || false);
 
     setFormTab('pessoal'); // Abre sempre na primeira aba
@@ -342,6 +395,8 @@ const Pacientes: React.FC = () => {
     setAtividadeFisica(false);
     setAtividadeFisicaDescricao('');
     setObservacoes('');
+    setTemSeletividade(false);
+    setAlimentosSeletividade('');
     setDietaBaixoCusto(false);
     setObjetivos([]);
     setPatologias([]);
@@ -1133,6 +1188,53 @@ const Pacientes: React.FC = () => {
                         placeholder="Frequência, modalidade e intensidade (ex: Musculação 4x/semana, corrida 1x/semana)"
                         value={atividadeFisicaDescricao}
                         onChange={(e) => setAtividadeFisicaDescricao(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  {/* Seletividade Alimentar */}
+                  <div className="form-group" style={{ backgroundColor: '#fcf8f2', padding: '16px', borderRadius: '12px', border: '1px solid #fdf0df', marginTop: '10px' }}>
+                    <div className="switch-group" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '46px', height: '24px', flexShrink: 0 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={temSeletividade} 
+                          onChange={(e) => setTemSeletividade(e.target.checked)} 
+                          style={{ opacity: 0, width: 0, height: 0 }}
+                        />
+                        <span className="slider" style={{
+                          position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                          backgroundColor: temSeletividade ? 'var(--primary-orange)' : '#ccc',
+                          transition: '.3s', borderRadius: '24px'
+                        }}>
+                          <span style={{
+                            position: 'absolute', content: '""', height: '18px', width: '18px', left: temSeletividade ? '24px' : '3px', bottom: '3px',
+                            backgroundColor: 'white', transition: '.3s', borderRadius: '50%'
+                          }}></span>
+                        </span>
+                      </label>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span className="switch-label" style={{ cursor: 'pointer', fontWeight: '600', fontSize: '14.5px', color: '#1a1a1a' }} onClick={() => setTemSeletividade(!temSeletividade)}>
+                          ⚠️ O paciente possui seletividade alimentar?
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#555', marginTop: '2px' }}>
+                          Marque para indicar que o paciente aceita apenas alimentos específicos.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {temSeletividade && (
+                    <div className="form-group" style={{ animation: 'fadeIn 0.2s ease' }}>
+                      <label className="form-label">Alimentos Aceitos / Preferidos pelo Paciente *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ paddingLeft: '14px' }}
+                        placeholder="Ex: banana, maçã, batata doce, arroz, frango grelhado"
+                        value={alimentosSeletividade}
+                        onChange={(e) => setAlimentosSeletividade(e.target.value)}
+                        required={temSeletividade}
                       />
                     </div>
                   )}
