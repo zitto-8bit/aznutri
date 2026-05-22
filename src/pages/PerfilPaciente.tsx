@@ -820,7 +820,7 @@ const PerfilPaciente: React.FC<PerfilPacienteProps> = ({ id }) => {
   // Auxiliares do editor de plano
   const handleAlimentoChange = (mealIndex: number, itemIndex: number, field: keyof AlimentoItem, val: string | number) => {
     const novoPlano = [...planoAlimentar];
-    (novoPlano[mealIndex].itens[itemIndex] as Record<string, string | number>)[field as string] = val;
+    (novoPlano[mealIndex].itens[itemIndex] as unknown as Record<string, string | number>)[field as string] = val;
     setPlanoAlimentar(novoPlano);
   };
 
